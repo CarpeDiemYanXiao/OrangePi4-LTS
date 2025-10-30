@@ -5,47 +5,6 @@
    3) 轨迹要比较粗（线宽>1像素）；
    4) 右上角提供“清屏按钮”，点击清除屏幕内容。 */
 
-/* 保留原始示例代码（仅打印事件）的参考实现，不直接删除：
-//#include <stdio.h>
-//#include "../common/common.h"
-//#define COLOR_BACKGROUND    FB_COLOR(0xff,0xff,0xff)
-//static int touch_fd;
-//static void touch_event_cb(int fd)
-//{
-//    int type,x,y,finger;
-//    type = touch_read(fd, &x,&y,&finger);
-//    switch(type){
-//    case TOUCH_PRESS:
-//        printf("TOUCH_PRESS：x=%d,y=%d,finger=%d\n",x,y,finger);
-//        break;
-//    case TOUCH_MOVE:
-//        printf("TOUCH_MOVE：x=%d,y=%d,finger=%d\n",x,y,finger);
-//        break;
-//    case TOUCH_RELEASE:
-//        printf("TOUCH_RELEASE：x=%d,y=%d,finger=%d\n",x,y,finger);
-//        break;
-//    case TOUCH_ERROR:
-//        printf("close touch fd\n");
-//        close(fd);
-//        task_delete_file(fd);
-//        break;
-//    default:
-//        return;
-//    }
-//    fb_update();
-//}
-//int main(int argc, char *argv[])
-//{
-//    fb_init("/dev/fb0");
-//    fb_draw_rect(0,0,SCREEN_WIDTH,SCREEN_HEIGHT,COLOR_BACKGROUND);
-//    fb_update();
-//    touch_fd = touch_init("/dev/input/event2");
-//    task_add_file(touch_fd, touch_event_cb);
-//    task_loop();
-//    return 0;
-//}
-*/
-
 #include <stdio.h>
 #include "../common/common.h"
 
@@ -53,6 +12,7 @@
 #define COLOR_BTN_BG       FB_COLOR(60,60,60)
 #define COLOR_BTN_BORDER   FB_COLOR(200,200,200)
 #define COLOR_BTN_TEXT     FB_COLOR(255,255,255)
+#define COLOR_TEST_BLOCK   FB_COLOR(0,180,255)
 
 /* 清屏按钮区域（右上角） */
 #define BTN_W 140
@@ -89,8 +49,8 @@ static void draw_button(void)
 	   font_init("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
 	   fb_draw_text(BTN_X + 22, BTN_Y + BTN_H - 18, "CLEAR", 28, COLOR_BTN_TEXT);
 	*/
-	/* 按需求在按钮上添加“清屏”两字（字体在 main 中初始化） */
-	fb_draw_text(BTN_X + 32, BTN_Y + BTN_H - 16, "清屏", 30, COLOR_BTN_TEXT);
+	/* 实际绘制按钮文字（若未 font_init 将静默失败并返回） */
+	fb_draw_text(BTN_X + 22, BTN_Y + BTN_H - 18, "CLEAR", 28, COLOR_BTN_TEXT);
 }
 
 /* 用“加粗画点”的方式实现粗线：在直线每个像素点处画一个 STROKE×STROKE 的小块 */
@@ -128,7 +88,7 @@ static void touch_event_cb(int fd)
 	switch(type){
 	case TOUCH_PRESS:
 		/* 保留原有打印 */
-		// printf("TOUCH_PRESS：x=%d,y=%d,finger=%d\n",x,y,finger);
+		printf("TOUCH_PRESS：x=%d,y=%d,finger=%d\n",x,y,finger);
 		if(in_button(x, y)){
 			clear_screen_and_state();
 			return;
@@ -140,7 +100,7 @@ static void touch_event_cb(int fd)
 		break;
 	case TOUCH_MOVE:
 		/* 保留原有打印 */
-		// printf("TOUCH_MOVE：x=%d,y=%d,finger=%d\n",x,y,finger);
+		printf("TOUCH_MOVE：x=%d,y=%d,finger=%d\n",x,y,finger);
 		if(finger >=0 && finger < FINGER_NUM_MAX && active[finger]){
 			draw_thick_line(last_x[finger], last_y[finger], x, y, finger_color[finger]);
 			last_x[finger] = x; last_y[finger] = y;
@@ -148,7 +108,7 @@ static void touch_event_cb(int fd)
 		break;
 	case TOUCH_RELEASE:
 		/* 保留原有打印 */
-		// printf("TOUCH_RELEASE：x=%d,y=%d,finger=%d\n",x,y,finger);
+		printf("TOUCH_RELEASE：x=%d,y=%d,finger=%d\n",x,y,finger);
 		if(finger >=0 && finger < FINGER_NUM_MAX) active[finger] = 0;
 		break;
 	case TOUCH_ERROR:
@@ -166,26 +126,17 @@ int main(int argc, char *argv[])
 {
 	fb_init("/dev/fb0");
 	fb_draw_rect(0,0,SCREEN_WIDTH,SCREEN_HEIGHT,COLOR_BACKGROUND);
+
+	/* 字体初始化：请按你的板子字体实际路径调整 */
+	font_init("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
+
+	/* 显眼的测试色块，开机即可验证绘制与刷新路径是否正常 */
+	int bx = (SCREEN_WIDTH - 200) / 2;
+	int by = (SCREEN_HEIGHT - 200) / 2;
+	fb_draw_rect(bx, by, 200, 200, COLOR_TEST_BLOCK);
+
 	draw_button();
 	fb_update();
-
-	/* 尝试初始化字体：优先选择常见的中文字体路径，可读即用 */
-	do {
-		const char *candidates[] = {
-			"/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-			"/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-			"/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
-			"/usr/share/fonts/truetype/arphic/ukai.ttf",
-			"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", /* 可能无中文，但作为兜底 */
-			(const char*)0
-		};
-		for(int i=0; candidates[i]; ++i){
-			if(access(candidates[i], R_OK) == 0){
-				font_init((char*)candidates[i]);
-				break;
-			}
-		}
-	} while(0);
 
 	//打开多点触摸设备文件, 返回文件fd（请按板子实际节点调整）
 	touch_fd = touch_init("/dev/input/event2");
