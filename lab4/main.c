@@ -89,6 +89,8 @@ static void draw_button(void)
 	   font_init("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
 	   fb_draw_text(BTN_X + 22, BTN_Y + BTN_H - 18, "CLEAR", 28, COLOR_BTN_TEXT);
 	*/
+	/* 按需求在按钮上添加“清屏”两字（字体在 main 中初始化） */
+	fb_draw_text(BTN_X + 32, BTN_Y + BTN_H - 16, "清屏", 30, COLOR_BTN_TEXT);
 }
 
 /* 用“加粗画点”的方式实现粗线：在直线每个像素点处画一个 STROKE×STROKE 的小块 */
@@ -166,6 +168,24 @@ int main(int argc, char *argv[])
 	fb_draw_rect(0,0,SCREEN_WIDTH,SCREEN_HEIGHT,COLOR_BACKGROUND);
 	draw_button();
 	fb_update();
+
+	/* 尝试初始化字体：优先选择常见的中文字体路径，可读即用 */
+	do {
+		const char *candidates[] = {
+			"/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+			"/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+			"/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+			"/usr/share/fonts/truetype/arphic/ukai.ttf",
+			"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", /* 可能无中文，但作为兜底 */
+			(const char*)0
+		};
+		for(int i=0; candidates[i]; ++i){
+			if(access(candidates[i], R_OK) == 0){
+				font_init((char*)candidates[i]);
+				break;
+			}
+		}
+	} while(0);
 
 	//打开多点触摸设备文件, 返回文件fd（请按板子实际节点调整）
 	touch_fd = touch_init("/dev/input/event2");
