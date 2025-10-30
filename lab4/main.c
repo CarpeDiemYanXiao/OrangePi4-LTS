@@ -1,0 +1,177 @@
+/* lab4: 多点触摸轨迹 + 清屏按钮
+   要求：
+   1) 不同手指不同颜色；
+   2) 轨迹连贯（MOVE 时连接 PRESS/上次坐标）；
+   3) 轨迹要比较粗（线宽>1像素）；
+   4) 右上角提供“清屏按钮”，点击清除屏幕内容。 */
+
+/* 保留原始示例代码（仅打印事件）的参考实现，不直接删除：
+//#include <stdio.h>
+//#include "../common/common.h"
+//#define COLOR_BACKGROUND    FB_COLOR(0xff,0xff,0xff)
+//static int touch_fd;
+//static void touch_event_cb(int fd)
+//{
+//    int type,x,y,finger;
+//    type = touch_read(fd, &x,&y,&finger);
+//    switch(type){
+//    case TOUCH_PRESS:
+//        printf("TOUCH_PRESS：x=%d,y=%d,finger=%d\n",x,y,finger);
+//        break;
+//    case TOUCH_MOVE:
+//        printf("TOUCH_MOVE：x=%d,y=%d,finger=%d\n",x,y,finger);
+//        break;
+//    case TOUCH_RELEASE:
+//        printf("TOUCH_RELEASE：x=%d,y=%d,finger=%d\n",x,y,finger);
+//        break;
+//    case TOUCH_ERROR:
+//        printf("close touch fd\n");
+//        close(fd);
+//        task_delete_file(fd);
+//        break;
+//    default:
+//        return;
+//    }
+//    fb_update();
+//}
+//int main(int argc, char *argv[])
+//{
+//    fb_init("/dev/fb0");
+//    fb_draw_rect(0,0,SCREEN_WIDTH,SCREEN_HEIGHT,COLOR_BACKGROUND);
+//    fb_update();
+//    touch_fd = touch_init("/dev/input/event2");
+//    task_add_file(touch_fd, touch_event_cb);
+//    task_loop();
+//    return 0;
+//}
+*/
+
+#include <stdio.h>
+#include "../common/common.h"
+
+#define COLOR_BACKGROUND   FB_COLOR(30,30,30)
+#define COLOR_BTN_BG       FB_COLOR(60,60,60)
+#define COLOR_BTN_BORDER   FB_COLOR(200,200,200)
+#define COLOR_BTN_TEXT     FB_COLOR(255,255,255)
+
+/* 清屏按钮区域（右上角） */
+#define BTN_W 140
+#define BTN_H 60
+#define BTN_X (SCREEN_WIDTH - BTN_W - 16)
+#define BTN_Y 16
+
+/* 轨迹线宽（像素） */
+#define STROKE 6
+
+static int touch_fd;
+static int last_x[FINGER_NUM_MAX];
+static int last_y[FINGER_NUM_MAX];
+static int active[FINGER_NUM_MAX];
+
+static int finger_color[FINGER_NUM_MAX] = {
+	FB_COLOR(255, 80, 80),   /* finger 0: 红 */
+	FB_COLOR(80, 255, 120),  /* finger 1: 绿 */
+	FB_COLOR(80, 160, 255),  /* finger 2: 蓝 */
+	FB_COLOR(255, 200, 80),  /* finger 3: 橙 */
+	FB_COLOR(200, 120, 255)  /* finger 4: 紫 */
+};
+
+static inline int in_button(int x, int y)
+{
+	return (x >= BTN_X && x < BTN_X + BTN_W && y >= BTN_Y && y < BTN_Y + BTN_H);
+}
+
+static void draw_button(void)
+{
+	fb_draw_rect(BTN_X, BTN_Y, BTN_W, BTN_H, COLOR_BTN_BG);
+	fb_draw_border(BTN_X, BTN_Y, BTN_W, BTN_H, COLOR_BTN_BORDER);
+	/* 如需在板子上显示文字，请先调用 font_init 并确保字体文件路径正确：
+	   font_init("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
+	   fb_draw_text(BTN_X + 22, BTN_Y + BTN_H - 18, "CLEAR", 28, COLOR_BTN_TEXT);
+	*/
+}
+
+/* 用“加粗画点”的方式实现粗线：在直线每个像素点处画一个 STROKE×STROKE 的小块 */
+static void draw_thick_line(int x1, int y1, int x2, int y2, int color)
+{
+	int dx = (x2 > x1) ? (x2 - x1) : (x1 - x2);
+	int dy = (y2 > y1) ? (y2 - y1) : (y1 - y2);
+	int sx = (x1 < x2) ? 1 : -1;
+	int sy = (y1 < y2) ? 1 : -1;
+	int err = dx - dy;
+	int x = x1, y = y1;
+	int half = STROKE / 2;
+
+	for(;;){
+		fb_draw_rect(x - half, y - half, STROKE, STROKE, color);
+		if(x == x2 && y == y2) break;
+		int e2 = err << 1;
+		if(e2 > -dy){ err -= dy; x += sx; }
+		if(e2 <  dx){ err += dx; y += sy; }
+	}
+}
+
+static void clear_screen_and_state(void)
+{
+	for(int i=0;i<FINGER_NUM_MAX;++i) active[i] = 0;
+	fb_draw_rect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, COLOR_BACKGROUND);
+	draw_button();
+	fb_update();
+}
+
+static void touch_event_cb(int fd)
+{
+	int type,x,y,finger;
+	type = touch_read(fd, &x,&y,&finger);
+	switch(type){
+	case TOUCH_PRESS:
+		/* 保留原有打印 */
+		printf("TOUCH_PRESS：x=%d,y=%d,finger=%d\n",x,y,finger);
+		if(in_button(x, y)){
+			clear_screen_and_state();
+			return;
+		}
+		if(finger >=0 && finger < FINGER_NUM_MAX){
+			last_x[finger] = x; last_y[finger] = y; active[finger] = 1;
+			fb_draw_rect(x - STROKE/2, y - STROKE/2, STROKE, STROKE, finger_color[finger]);
+		}
+		break;
+	case TOUCH_MOVE:
+		/* 保留原有打印 */
+		printf("TOUCH_MOVE：x=%d,y=%d,finger=%d\n",x,y,finger);
+		if(finger >=0 && finger < FINGER_NUM_MAX && active[finger]){
+			draw_thick_line(last_x[finger], last_y[finger], x, y, finger_color[finger]);
+			last_x[finger] = x; last_y[finger] = y;
+		}
+		break;
+	case TOUCH_RELEASE:
+		/* 保留原有打印 */
+		printf("TOUCH_RELEASE：x=%d,y=%d,finger=%d\n",x,y,finger);
+		if(finger >=0 && finger < FINGER_NUM_MAX) active[finger] = 0;
+		break;
+	case TOUCH_ERROR:
+		printf("close touch fd\n");
+		close(fd);
+		task_delete_file(fd);
+		break;
+	default:
+		return;
+	}
+	fb_update();
+}
+
+int main(int argc, char *argv[])
+{
+	fb_init("/dev/fb0");
+	fb_draw_rect(0,0,SCREEN_WIDTH,SCREEN_HEIGHT,COLOR_BACKGROUND);
+	draw_button();
+	fb_update();
+
+	//打开多点触摸设备文件, 返回文件fd（请按板子实际节点调整）
+	touch_fd = touch_init("/dev/input/event2");
+	//添加任务, 当touch_fd文件可读时, 会自动调用touch_event_cb函数
+	task_add_file(touch_fd, touch_event_cb);
+    
+	task_loop(); //进入任务循环
+	return 0;
+}
