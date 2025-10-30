@@ -128,7 +128,7 @@ static void touch_event_cb(int fd)
 	switch(type){
 	case TOUCH_PRESS:
 		/* 保留原有打印 */
-		printf("TOUCH_PRESS：x=%d,y=%d,finger=%d\n",x,y,finger);
+		// printf("TOUCH_PRESS：x=%d,y=%d,finger=%d\n",x,y,finger);
 		if(in_button(x, y)){
 			clear_screen_and_state();
 			return;
@@ -140,7 +140,7 @@ static void touch_event_cb(int fd)
 		break;
 	case TOUCH_MOVE:
 		/* 保留原有打印 */
-		printf("TOUCH_MOVE：x=%d,y=%d,finger=%d\n",x,y,finger);
+		// printf("TOUCH_MOVE：x=%d,y=%d,finger=%d\n",x,y,finger);
 		if(finger >=0 && finger < FINGER_NUM_MAX && active[finger]){
 			draw_thick_line(last_x[finger], last_y[finger], x, y, finger_color[finger]);
 			last_x[finger] = x; last_y[finger] = y;
@@ -148,7 +148,7 @@ static void touch_event_cb(int fd)
 		break;
 	case TOUCH_RELEASE:
 		/* 保留原有打印 */
-		printf("TOUCH_RELEASE：x=%d,y=%d,finger=%d\n",x,y,finger);
+		// printf("TOUCH_RELEASE：x=%d,y=%d,finger=%d\n",x,y,finger);
 		if(finger >=0 && finger < FINGER_NUM_MAX) active[finger] = 0;
 		break;
 	case TOUCH_ERROR:
