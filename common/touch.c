@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/ioctl.h>
 
 static struct finger_info{
 	int x;
@@ -14,26 +15,30 @@ static struct finger_info{
 	int event;
 } infos[FINGER_NUM_MAX];
 static int cur_slot = 0;
+static int x_min = 0, x_max = 4095;
+static int y_min = 0, y_max = 4095;
 
-/* 运行时从设备查询的坐标范围，作为缩放依据（默认按 0~4095） */
-static int abs_min_x = 0, abs_max_x = 4095;
-static int abs_min_y = 0, abs_max_y = 4095;
-
-static inline int _scale_to_screen(int v, int vmin, int vmax, int out)
+static inline int _scale_coord(int value, int min, int max, int limit)
 {
-	if(vmax <= vmin) return 0;
-	long long num = (long long)(v - vmin) * (long long)(out - 1);
-	long long den = (long long)(vmax - vmin);
-	long long t = num / den;
-	if(t < 0) t = 0;
-	if(t >= out) t = out - 1;
-	return (int)t;
+	if(max <= min) return 0;
+	if(value < min) value = min;
+	if(value > max) value = max;
+	long range = (long)max - (long)min;
+	long scaled = ((long)(value - min) * (limit - 1)) / range;
+	if(scaled < 0) scaled = 0;
+	if(scaled >= limit) scaled = limit - 1;
+	return (int)scaled;
 }
 
-static inline int ADJUST_X_FUNC(int n)
-{ return _scale_to_screen(n, abs_min_x, abs_max_x, SCREEN_WIDTH); }
-static inline int ADJUST_Y_FUNC(int n)
-{ return _scale_to_screen(n, abs_min_y, abs_max_y, SCREEN_HEIGHT); }
+static inline int adjust_x(int raw)
+{
+	return _scale_coord(raw, x_min, x_max, SCREEN_WIDTH);
+}
+
+static inline int adjust_y(int raw)
+{
+	return _scale_coord(raw, y_min, y_max, SCREEN_HEIGHT);
+}
 
 int touch_init(char *dev)
 {
@@ -42,18 +47,16 @@ int touch_init(char *dev)
 		printf("touch_init open %s error!errno = %d\n", dev, errno);
 		return -1;
 	}
-
-	/* 查询设备坐标范围，兼容不同面板（例如 0~32767） */
-	struct input_absinfo ainfo;
-	if(ioctl(fd, EVIOCGABS(ABS_MT_POSITION_X), &ainfo) == 0){
-		abs_min_x = ainfo.minimum;
-		abs_max_x = ainfo.maximum;
+	struct input_absinfo absinfo;
+	if(ioctl(fd, EVIOCGABS(ABS_MT_POSITION_X), &absinfo) == 0){
+		x_min = absinfo.minimum;
+		x_max = absinfo.maximum;
 	}
-	if(ioctl(fd, EVIOCGABS(ABS_MT_POSITION_Y), &ainfo) == 0){
-		abs_min_y = ainfo.minimum;
-		abs_max_y = ainfo.maximum;
+	if(ioctl(fd, EVIOCGABS(ABS_MT_POSITION_Y), &absinfo) == 0){
+		y_min = absinfo.minimum;
+		y_max = absinfo.maximum;
 	}
-	printf("touch abs range: X=[%d,%d], Y=[%d,%d]\n", abs_min_x, abs_max_x, abs_min_y, abs_max_y);
+	printf("touch_init: range X[%d,%d] Y[%d,%d]\n", x_min, x_max, y_min, y_max);
 	return fd;
 }
 
@@ -67,8 +70,6 @@ int touch_init(char *dev)
 	y: [0 ~ SCREEN_HEIGHT)
 	finger: 0,1,2,3,4
 */
-
-/* 坐标缩放：根据运行时查询到的 min/max 映射到屏幕像素 */
 
 int touch_read(int touch_fd, int *x, int *y, int *finger)
 {
@@ -111,13 +112,13 @@ int touch_read(int touch_fd, int *x, int *y, int *finger)
 			}
 			break;
 		case ABS_MT_POSITION_X:
-			infos[cur_slot].x = ADJUST_X_FUNC(data.value);
+			infos[cur_slot].x = adjust_x(data.value);
 			if(infos[cur_slot].event != TOUCH_PRESS) {
 				infos[cur_slot].event = TOUCH_MOVE;
 			}
 			break;
 		case ABS_MT_POSITION_Y:
-			infos[cur_slot].y = ADJUST_Y_FUNC(data.value);
+			infos[cur_slot].y = adjust_y(data.value);
 			if(infos[cur_slot].event != TOUCH_PRESS) {
 				infos[cur_slot].event = TOUCH_MOVE;
 			}

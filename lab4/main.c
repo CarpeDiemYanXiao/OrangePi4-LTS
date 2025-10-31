@@ -8,11 +8,10 @@
 #include <stdio.h>
 #include "../common/common.h"
 
-#define COLOR_BACKGROUND   FB_COLOR(30,30,30)
-#define COLOR_BTN_BG       FB_COLOR(60,60,60)
-#define COLOR_BTN_BORDER   FB_COLOR(200,200,200)
+#define COLOR_BACKGROUND   FB_COLOR(235,235,235)
+#define COLOR_BTN_BG       FB_COLOR(40,40,40)
+#define COLOR_BTN_BORDER   FB_COLOR(220,220,220)
 #define COLOR_BTN_TEXT     FB_COLOR(255,255,255)
-#define COLOR_TEST_BLOCK   FB_COLOR(0,180,255)
 
 /* 清屏按钮区域（右上角） */
 #define BTN_W 140
@@ -21,7 +20,7 @@
 #define BTN_Y 16
 
 /* 轨迹线宽（像素） */
-#define STROKE 6
+#define STROKE 10
 
 static int touch_fd;
 static int last_x[FINGER_NUM_MAX];
@@ -41,6 +40,13 @@ static inline int in_button(int x, int y)
 	return (x >= BTN_X && x < BTN_X + BTN_W && y >= BTN_Y && y < BTN_Y + BTN_H);
 }
 
+static inline int clamp_coord(int value, int max)
+{
+	if(value < 0) return 0;
+	if(value >= max) return max - 1;
+	return value;
+}
+
 static void draw_button(void)
 {
 	fb_draw_rect(BTN_X, BTN_Y, BTN_W, BTN_H, COLOR_BTN_BG);
@@ -49,8 +55,6 @@ static void draw_button(void)
 	   font_init("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
 	   fb_draw_text(BTN_X + 22, BTN_Y + BTN_H - 18, "CLEAR", 28, COLOR_BTN_TEXT);
 	*/
-	/* 实际绘制按钮文字（若未 font_init 将静默失败并返回） */
-	fb_draw_text(BTN_X + 22, BTN_Y + BTN_H - 18, "CLEAR", 28, COLOR_BTN_TEXT);
 }
 
 /* 用“加粗画点”的方式实现粗线：在直线每个像素点处画一个 STROKE×STROKE 的小块 */
@@ -87,6 +91,8 @@ static void touch_event_cb(int fd)
 	type = touch_read(fd, &x,&y,&finger);
 	switch(type){
 	case TOUCH_PRESS:
+		x = clamp_coord(x, SCREEN_WIDTH);
+		y = clamp_coord(y, SCREEN_HEIGHT);
 		/* 保留原有打印 */
 		printf("TOUCH_PRESS：x=%d,y=%d,finger=%d\n",x,y,finger);
 		if(in_button(x, y)){
@@ -99,17 +105,18 @@ static void touch_event_cb(int fd)
 		}
 		break;
 	case TOUCH_MOVE:
+		x = clamp_coord(x, SCREEN_WIDTH);
+		y = clamp_coord(y, SCREEN_HEIGHT);
 		/* 保留原有打印 */
 		printf("TOUCH_MOVE：x=%d,y=%d,finger=%d\n",x,y,finger);
 		if(finger >=0 && finger < FINGER_NUM_MAX && active[finger]){
 			draw_thick_line(last_x[finger], last_y[finger], x, y, finger_color[finger]);
 			last_x[finger] = x; last_y[finger] = y;
-		} else {
-			/* 若未识别到 finger，可尝试落笔一次便于观察 */
-			fb_draw_rect(x - STROKE/2, y - STROKE/2, STROKE, STROKE, finger_color[0]);
 		}
 		break;
 	case TOUCH_RELEASE:
+		x = clamp_coord(x, SCREEN_WIDTH);
+		y = clamp_coord(y, SCREEN_HEIGHT);
 		/* 保留原有打印 */
 		printf("TOUCH_RELEASE：x=%d,y=%d,finger=%d\n",x,y,finger);
 		if(finger >=0 && finger < FINGER_NUM_MAX) active[finger] = 0;
@@ -129,15 +136,6 @@ int main(int argc, char *argv[])
 {
 	fb_init("/dev/fb0");
 	fb_draw_rect(0,0,SCREEN_WIDTH,SCREEN_HEIGHT,COLOR_BACKGROUND);
-
-	/* 字体初始化：请按你的板子字体实际路径调整 */
-	font_init("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
-
-	/* 显眼的测试色块，开机即可验证绘制与刷新路径是否正常 */
-	int bx = (SCREEN_WIDTH - 200) / 2;
-	int by = (SCREEN_HEIGHT - 200) / 2;
-	fb_draw_rect(bx, by, 200, 200, COLOR_TEST_BLOCK);
-
 	draw_button();
 	fb_update();
 
