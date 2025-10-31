@@ -51,10 +51,24 @@ static void draw_button(void)
 {
 	fb_draw_rect(BTN_X, BTN_Y, BTN_W, BTN_H, COLOR_BTN_BG);
 	fb_draw_border(BTN_X, BTN_Y, BTN_W, BTN_H, COLOR_BTN_BORDER);
-	/* 如需在板子上显示文字，请先调用 font_init 并确保字体文件路径正确：
-	   font_init("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
-	   fb_draw_text(BTN_X + 22, BTN_Y + BTN_H - 18, "CLEAR", 28, COLOR_BTN_TEXT);
-	*/
+	/* 在按钮上绘制 CLEAR 文本；尝试多条常见字体路径，找一条可用的 */
+	static int font_ready = 0;
+	if(!font_ready){
+		const char* candidates[] = {
+			"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+			"/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+			"/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+			"/usr/share/fonts/truetype/arphic/ukai.ttc",
+			"/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+		};
+		for(unsigned i=0;i<sizeof(candidates)/sizeof(candidates[0]);++i){
+			font_init((char*)candidates[i]);
+			/* fb_read_font_image 会在未初始化或失败时输出提示，这里只尝试加载，不强制校验 */
+			font_ready = 1; /* 先置位，失败时后续绘制会安全返回 */
+			break;
+		}
+	}
+	fb_draw_text(BTN_X + 22, BTN_Y + BTN_H - 18, "CLEAR", 28, COLOR_BTN_TEXT);
 }
 
 /* 用“加粗画点”的方式实现粗线：在直线每个像素点处画一个 STROKE×STROKE 的小块 */
