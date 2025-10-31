@@ -1,154 +1,132 @@
-/* lab4: 多点触摸轨迹 + 清屏按钮
-   要求：
-   1) 不同手指不同颜色；
-   2) 轨迹连贯（MOVE 时连接 PRESS/上次坐标）；
-   3) 轨迹要比较粗（线宽>1像素）；
-   4) 右上角提供“清屏按钮”，点击清除屏幕内容。 */
-
 #include <stdio.h>
 #include "../common/common.h"
 
-#define COLOR_BACKGROUND   FB_COLOR(235,235,235)
-#define COLOR_BTN_BG       FB_COLOR(40,40,40)
-#define COLOR_BTN_BORDER   FB_COLOR(220,220,220)
-#define COLOR_BTN_TEXT     FB_COLOR(255,255,255)
+#define COLOR_BACKGROUND	FB_COLOR(0xff,0xff,0xff)
 
-/* 清屏按钮区域（右上角） */
-#define BTN_W 140
-#define BTN_H 60
-#define BTN_X (SCREEN_WIDTH - BTN_W - 16)
-#define BTN_Y 16
+/*================ lab4: touch track drawing ================*/
+/*
+  需求：
+  1) 每个手指轨迹颜色不同；
+  2) 轨迹连贯、线宽>1；
+  3) 清屏按钮，点击后清空。
+  说明：不删除原有注释，新增代码尽量最小侵入。
+*/
 
-/* 轨迹线宽（像素） */
-#define STROKE 10
+#define FINGER_MAX FINGER_NUM_MAX
 
-static int touch_fd;
-static int last_x[FINGER_NUM_MAX];
-static int last_y[FINGER_NUM_MAX];
-static int active[FINGER_NUM_MAX];
-
-static int finger_color[FINGER_NUM_MAX] = {
-	FB_COLOR(255, 80, 80),   /* finger 0: 红 */
-	FB_COLOR(80, 255, 120),  /* finger 1: 绿 */
-	FB_COLOR(80, 160, 255),  /* finger 2: 蓝 */
-	FB_COLOR(255, 200, 80),  /* finger 3: 橙 */
-	FB_COLOR(200, 120, 255)  /* finger 4: 紫 */
+/* 预设每个手指的轨迹颜色 */
+static const int finger_colors[FINGER_MAX] = {
+	FB_COLOR(0xff, 0x00, 0x00), /* finger0: red */
+	FB_COLOR(0x00, 0x80, 0xff), /* finger1: blue */
+	FB_COLOR(0x00, 0xcc, 0x00), /* finger2: green */
+	FB_COLOR(0xff, 0x99, 0x00), /* finger3: orange */
+	FB_COLOR(0x88, 0x00, 0xff), /* finger4: purple */
 };
 
-/* 心跳方块：用于快速确认绘图刷新链路是否正常（每 200ms 移动一次） */
-static void heartbeat_cb(int period_ms)
-{
-	static int hx = 10, hy = 10, dx = 6, dy = 4;
-	/* 擦除上一帧（用背景色在方块区域覆盖），然后画新位置 */
-	fb_draw_rect(hx, hy, 20, 20, COLOR_BACKGROUND);
-	hx += dx; hy += dy;
-	if(hx < 0){ hx = 0; dx = -dx; }
-	if(hy < 0){ hy = 0; dy = -dy; }
-	if(hx + 20 >= SCREEN_WIDTH){ hx = SCREEN_WIDTH - 21; dx = -dx; }
-	if(hy + 20 >= SCREEN_HEIGHT){ hy = SCREEN_HEIGHT - 21; dy = -dy; }
-	fb_draw_rect(hx, hy, 20, 20, FB_COLOR(255,40,40));
-	fb_update();
+/* 记录手指上一次位置与是否激活 */
+static int last_x[FINGER_MAX] = {0};
+static int last_y[FINGER_MAX] = {0};
+static unsigned char finger_active[FINGER_MAX] = {0};
+
+/* 画刷厚度（像素） */
+static int brush_size = 8; /* 可调整 6~12 之间 */
+
+/* 清屏按钮区域 */
+#define BTN_W  140
+#define BTN_H   60
+static int btn_x = (SCREEN_WIDTH - BTN_W - 20);
+static int btn_y = 20;
+static const int btn_bg = FB_COLOR(0xee,0xee,0xee);
+static const int btn_border = FB_COLOR(0x66,0x66,0x66);
+static const int btn_text_color = FB_COLOR(0x00,0x00,0x00);
+
+static inline int in_rect(int x, int y, int rx, int ry, int rw, int rh){
+	return (x >= rx && x < rx+rw && y >= ry && y < ry+rh);
 }
 
-static inline int in_button(int x, int y)
-{
-	return (x >= BTN_X && x < BTN_X + BTN_W && y >= BTN_Y && y < BTN_Y + BTN_H);
+static void draw_button(void){
+	fb_draw_rect(btn_x, btn_y, BTN_W, BTN_H, btn_bg);
+	fb_draw_border(btn_x, btn_y, BTN_W, BTN_H, btn_border);
+	/* 如已初始化字体，可显示“Clear”标签；否则仅显示按钮框 */
+	/* 保留注释：
+	   可选：font_init("/path/to/your.ttf");
+	   fb_draw_text(btn_x + 20, btn_y + 40, "Clear", 32, btn_text_color);
+	*/
+	/* 实际绘制按钮文字：Clear（已在 main 中初始化字体文件 font.ttc） */
+	fb_draw_text(btn_x + 20, btn_y + BTN_H - 20, "Clear", 32, btn_text_color);
 }
 
-static inline int clamp_coord(int value, int max)
-{
-	if(value < 0) return 0;
-	if(value >= max) return max - 1;
-	return value;
+/* 画一个方形画笔点，中心在 (cx,cy) */
+static void draw_brush_point(int cx, int cy, int color){
+	int half = brush_size / 2;
+	int rx = cx - half;
+	int ry = cy - half;
+	int rw = brush_size;
+	int rh = brush_size;
+	/* 边界裁剪 */
+	if(rx < 0){ rw += rx; rx = 0; }
+	if(ry < 0){ rh += ry; ry = 0; }
+	if(rx + rw > SCREEN_WIDTH)  rw = SCREEN_WIDTH - rx;
+	if(ry + rh > SCREEN_HEIGHT) rh = SCREEN_HEIGHT - ry;
+	if(rw > 0 && rh > 0) fb_draw_rect(rx, ry, rw, rh, color);
 }
 
-static void draw_button(void)
-{
-	fb_draw_rect(BTN_X, BTN_Y, BTN_W, BTN_H, COLOR_BTN_BG);
-	fb_draw_border(BTN_X, BTN_Y, BTN_W, BTN_H, COLOR_BTN_BORDER);
-	/* 在按钮上绘制 CLEAR 文本；尝试多条常见字体路径，找一条可用的 */
-	static int font_ready = 0;
-	if(!font_ready){
-		const char* candidates[] = {
-			"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-			"/usr/share/fonts/truetype/freefont/FreeSans.ttf",
-			"/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-			"/usr/share/fonts/truetype/arphic/ukai.ttc",
-			"/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
-		};
-		for(unsigned i=0;i<sizeof(candidates)/sizeof(candidates[0]);++i){
-			font_init((char*)candidates[i]);
-			/* fb_read_font_image 会在未初始化或失败时输出提示，这里只尝试加载，不强制校验 */
-			font_ready = 1; /* 先置位，失败时后续绘制会安全返回 */
-			break;
+/* 用简单 DDA 在两点之间打点，并用方形画笔加粗 */
+static void draw_brush_line(int x1, int y1, int x2, int y2, int color){
+	int dx = x2 - x1;
+	int dy = y2 - y1;
+	int steps = (dx>0?dx:-dx) > (dy>0?dy:-dy) ? (dx>0?dx:-dx) : (dy>0?dy:-dy);
+	if(steps == 0){ draw_brush_point(x1, y1, color); return; }
+	/* 为避免精度丢失，用浮点步进足够了；若需纯整数可改为 Bresenham 并在每点处画刷 */
+	float fx = (float)x1, fy = (float)y1;
+	float sx = (float)dx / (float)steps;
+	float sy = (float)dy / (float)steps;
+	for(int i=0; i<=steps; ++i){
+		int px = (int)(fx + 0.5f);
+		int py = (int)(fy + 0.5f);
+		if(px>=0 && px<SCREEN_WIDTH && py>=0 && py<SCREEN_HEIGHT){
+			draw_brush_point(px, py, color);
 		}
-	}
-	fb_draw_text(BTN_X + 22, BTN_Y + BTN_H - 18, "CLEAR", 28, COLOR_BTN_TEXT);
-}
-
-/* 用“加粗画点”的方式实现粗线：在直线每个像素点处画一个 STROKE×STROKE 的小块 */
-static void draw_thick_line(int x1, int y1, int x2, int y2, int color)
-{
-	int dx = (x2 > x1) ? (x2 - x1) : (x1 - x2);
-	int dy = (y2 > y1) ? (y2 - y1) : (y1 - y2);
-	int sx = (x1 < x2) ? 1 : -1;
-	int sy = (y1 < y2) ? 1 : -1;
-	int err = dx - dy;
-	int x = x1, y = y1;
-	int half = STROKE / 2;
-
-	for(;;){
-		fb_draw_rect(x - half, y - half, STROKE, STROKE, color);
-		if(x == x2 && y == y2) break;
-		int e2 = err << 1;
-		if(e2 > -dy){ err -= dy; x += sx; }
-		if(e2 <  dx){ err += dx; y += sy; }
+		fx += sx; fy += sy;
 	}
 }
 
-static void clear_screen_and_state(void)
-{
-	for(int i=0;i<FINGER_NUM_MAX;++i) active[i] = 0;
-	fb_draw_rect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, COLOR_BACKGROUND);
-	draw_button();
-	fb_update();
-}
-
+static int touch_fd;
 static void touch_event_cb(int fd)
 {
 	int type,x,y,finger;
 	type = touch_read(fd, &x,&y,&finger);
 	switch(type){
 	case TOUCH_PRESS:
-		x = clamp_coord(x, SCREEN_WIDTH);
-		y = clamp_coord(y, SCREEN_HEIGHT);
-		/* 保留原有打印 */
 		printf("TOUCH_PRESS：x=%d,y=%d,finger=%d\n",x,y,finger);
-		if(in_button(x, y)){
-			clear_screen_and_state();
-			return;
+		if(in_rect(x,y, btn_x,btn_y, BTN_W,BTN_H)){
+			/* 点击按钮：立即清屏并重画按钮 */
+			fb_draw_rect(0,0,SCREEN_WIDTH,SCREEN_HEIGHT,COLOR_BACKGROUND);
+			draw_button();
+			/* 清空各手指状态 */
+			for(int i=0;i<FINGER_MAX;++i){ finger_active[i]=0; }
+			break;
 		}
-		if(finger >=0 && finger < FINGER_NUM_MAX){
-			last_x[finger] = x; last_y[finger] = y; active[finger] = 1;
-			fb_draw_rect(x - STROKE/2, y - STROKE/2, STROKE, STROKE, finger_color[finger]);
+		if(finger>=0 && finger<FINGER_MAX){
+			finger_active[finger] = 1;
+			last_x[finger] = x;
+			last_y[finger] = y;
+			draw_brush_point(x, y, finger_colors[finger]);
 		}
 		break;
 	case TOUCH_MOVE:
-		x = clamp_coord(x, SCREEN_WIDTH);
-		y = clamp_coord(y, SCREEN_HEIGHT);
-		/* 保留原有打印 */
 		printf("TOUCH_MOVE：x=%d,y=%d,finger=%d\n",x,y,finger);
-		if(finger >=0 && finger < FINGER_NUM_MAX && active[finger]){
-			draw_thick_line(last_x[finger], last_y[finger], x, y, finger_color[finger]);
-			last_x[finger] = x; last_y[finger] = y;
+		if(finger>=0 && finger<FINGER_MAX && finger_active[finger]){
+			draw_brush_line(last_x[finger], last_y[finger], x, y, finger_colors[finger]);
+			last_x[finger] = x;
+			last_y[finger] = y;
 		}
 		break;
 	case TOUCH_RELEASE:
-		x = clamp_coord(x, SCREEN_WIDTH);
-		y = clamp_coord(y, SCREEN_HEIGHT);
-		/* 保留原有打印 */
 		printf("TOUCH_RELEASE：x=%d,y=%d,finger=%d\n",x,y,finger);
-		if(finger >=0 && finger < FINGER_NUM_MAX) active[finger] = 0;
+		if(finger>=0 && finger<FINGER_MAX){
+			finger_active[finger] = 0;
+		}
 		break;
 	case TOUCH_ERROR:
 		printf("close touch fd\n");
@@ -159,24 +137,24 @@ static void touch_event_cb(int fd)
 		return;
 	}
 	fb_update();
+	return;
 }
 
 int main(int argc, char *argv[])
 {
 	fb_init("/dev/fb0");
 	fb_draw_rect(0,0,SCREEN_WIDTH,SCREEN_HEIGHT,COLOR_BACKGROUND);
+	/* 初始化字体：优先加载运行目录下的 font.ttc（与可执行同目录 out/），
+	   若需可根据设备环境改为系统字体路径。*/
+	font_init("font.ttc");
 	draw_button();
 	fb_update();
 
-	// 打开多点触摸设备文件, 可以通过命令行参数指定；未指定则尝试 /dev/input/event2 或自动扫描
-	const char *dev = (argc > 1 && argv[1]) ? argv[1] : "auto"; /* 默认自动扫描触摸设备 */
-	printf("try open input device: %s\n", dev);
-	touch_fd = touch_init((char*)dev);
+	//打开多点触摸设备文件, 返回文件fd
+	touch_fd = touch_init("/dev/input/event2");
 	//添加任务, 当touch_fd文件可读时, 会自动调用touch_event_cb函数
 	task_add_file(touch_fd, touch_event_cb);
-	// 添加心跳方块定时器（200ms），若你不需要可注释掉这行
-	task_add_timer(200, heartbeat_cb);
-    
+	
 	task_loop(); //进入任务循环
 	return 0;
 }

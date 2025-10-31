@@ -16,6 +16,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
+#include <errno.h>
 
 static struct finger_info{
 	int x;
@@ -26,6 +27,7 @@ static int cur_slot = 0;
 static int x_min = 0, x_max = 4095;
 static int y_min = 0, y_max = 4095;
 static int single_touch_fallback = 0; /* 兼容只有 ABS_X/ABS_Y 的设备 */
+static int g_touch_debug = 0; /* 设置环境变量 TOUCH_DEBUG=1 以打印底层事件 */
 
 static inline int _scale_coord(int value, int min, int max, int limit)
 {
@@ -51,7 +53,10 @@ static inline int adjust_y(int raw)
 
 int touch_init(char *dev)
 {
-	int fd = open(dev, O_RDONLY);
+	int fd = -1;
+	if(dev && strcmp(dev, "auto") != 0){
+		fd = open(dev, O_RDONLY);
+	}
 	if(fd < 0){
 		/* 失败则尝试自动扫描 /dev/input/event0..31 */
 		char path[64];
@@ -77,7 +82,55 @@ int touch_init(char *dev)
 			return -1;
 		}
 	}
+
+	/* 环境变量控制调试输出 */
+	{
+		char *e = getenv("TOUCH_DEBUG");
+		if(e && e[0] == '1') g_touch_debug = 1;
+	}
+
+	/* 如果打开的设备不具备触摸轴能力，则再尝试扫描更合适的设备 */
+	{
+		struct input_absinfo tmp;
+		int has_mt = (ioctl(fd, EVIOCGABS(ABS_MT_POSITION_X), &tmp) == 0) &&
+					 (ioctl(fd, EVIOCGABS(ABS_MT_POSITION_Y), &tmp) == 0);
+		int has_st = (ioctl(fd, EVIOCGABS(ABS_X), &tmp) == 0) &&
+					 (ioctl(fd, EVIOCGABS(ABS_Y), &tmp) == 0);
+		if(!(has_mt || has_st)){
+			char path[64];
+			for(int i=0;i<32;++i){
+				snprintf(path, sizeof(path), "/dev/input/event%d", i);
+				int tfd = open(path, O_RDONLY);
+				if(tfd < 0) continue;
+				has_mt = (ioctl(tfd, EVIOCGABS(ABS_MT_POSITION_X), &tmp) == 0) &&
+						 (ioctl(tfd, EVIOCGABS(ABS_MT_POSITION_Y), &tmp) == 0);
+				has_st = (ioctl(tfd, EVIOCGABS(ABS_X), &tmp) == 0) &&
+						 (ioctl(tfd, EVIOCGABS(ABS_Y), &tmp) == 0);
+				if(has_mt || has_st){
+					printf("touch_init: auto select %s (mt=%d st=%d)\n", path, has_mt, has_st);
+					close(fd);
+					fd = tfd; tfd = -1;
+					single_touch_fallback = has_mt ? 0 : 1;
+					break;
+				}
+				close(tfd);
+			}
+			if(fd < 0){
+				printf("touch_init: no suitable input event found.\n");
+				return -1;
+			}
+		} else {
+			single_touch_fallback = has_mt ? 0 : 1;
+		}
+	}
 	struct input_absinfo absinfo;
+	/* 打印设备名，便于确认绑定对象 */
+	{
+		char name[128];
+		if(ioctl(fd, EVIOCGNAME(sizeof(name)), name) >= 0){
+			printf("touch device: %s\n", name);
+		}
+	}
 	if(ioctl(fd, EVIOCGABS(ABS_MT_POSITION_X), &absinfo) == 0){
 		x_min = absinfo.minimum;
 		x_max = absinfo.maximum;
@@ -118,7 +171,9 @@ int touch_read(int touch_fd, int *x, int *y, int *finger)
 		printf("touch_read error %d, errno=%d\n", n, errno);
 		return TOUCH_ERROR;
 	}
-//	printf("event read: type-code-value = %d-%d-%d\n", data.type, data.code, data.value);
+	if(g_touch_debug){
+		printf("ev: t=%u c=%u v=%d\n", data.type, data.code, data.value);
+	}
 	switch(data.type)
 	{
 	case EV_ABS:
