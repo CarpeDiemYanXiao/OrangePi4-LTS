@@ -35,6 +35,21 @@ static int finger_color[FINGER_NUM_MAX] = {
 	FB_COLOR(200, 120, 255)  /* finger 4: 紫 */
 };
 
+/* 心跳方块：用于快速确认绘图刷新链路是否正常（每 200ms 移动一次） */
+static void heartbeat_cb(int period_ms)
+{
+	static int hx = 10, hy = 10, dx = 6, dy = 4;
+	/* 擦除上一帧（用背景色在方块区域覆盖），然后画新位置 */
+	fb_draw_rect(hx, hy, 20, 20, COLOR_BACKGROUND);
+	hx += dx; hy += dy;
+	if(hx < 0){ hx = 0; dx = -dx; }
+	if(hy < 0){ hy = 0; dy = -dy; }
+	if(hx + 20 >= SCREEN_WIDTH){ hx = SCREEN_WIDTH - 21; dx = -dx; }
+	if(hy + 20 >= SCREEN_HEIGHT){ hy = SCREEN_HEIGHT - 21; dy = -dy; }
+	fb_draw_rect(hx, hy, 20, 20, FB_COLOR(255,40,40));
+	fb_update();
+}
+
 static inline int in_button(int x, int y)
 {
 	return (x >= BTN_X && x < BTN_X + BTN_W && y >= BTN_Y && y < BTN_Y + BTN_H);
@@ -154,11 +169,13 @@ int main(int argc, char *argv[])
 	fb_update();
 
 	// 打开多点触摸设备文件, 可以通过命令行参数指定；未指定则尝试 /dev/input/event2 或自动扫描
-	const char *dev = (argc > 1 && argv[1]) ? argv[1] : "/dev/input/event2";
+	const char *dev = (argc > 1 && argv[1]) ? argv[1] : "auto"; /* 默认自动扫描触摸设备 */
 	printf("try open input device: %s\n", dev);
 	touch_fd = touch_init((char*)dev);
 	//添加任务, 当touch_fd文件可读时, 会自动调用touch_event_cb函数
 	task_add_file(touch_fd, touch_event_cb);
+	// 添加心跳方块定时器（200ms），若你不需要可注释掉这行
+	task_add_timer(200, heartbeat_cb);
     
 	task_loop(); //进入任务循环
 	return 0;
