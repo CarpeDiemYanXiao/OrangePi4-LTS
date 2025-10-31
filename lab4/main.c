@@ -139,8 +139,10 @@ int main(int argc, char *argv[])
 	draw_button();
 	fb_update();
 
-	//打开多点触摸设备文件, 返回文件fd（请按板子实际节点调整）
-	touch_fd = touch_init("/dev/input/event2");
+	// 打开多点触摸设备文件, 可以通过命令行参数指定；未指定则尝试 /dev/input/event2 或自动扫描
+	const char *dev = (argc > 1 && argv[1]) ? argv[1] : "/dev/input/event2";
+	printf("try open input device: %s\n", dev);
+	touch_fd = touch_init((char*)dev);
 	//添加任务, 当touch_fd文件可读时, 会自动调用touch_event_cb函数
 	task_add_file(touch_fd, touch_event_cb);
     
