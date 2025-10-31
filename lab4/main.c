@@ -104,6 +104,9 @@ static void touch_event_cb(int fd)
 		if(finger >=0 && finger < FINGER_NUM_MAX && active[finger]){
 			draw_thick_line(last_x[finger], last_y[finger], x, y, finger_color[finger]);
 			last_x[finger] = x; last_y[finger] = y;
+		} else {
+			/* 若未识别到 finger，可尝试落笔一次便于观察 */
+			fb_draw_rect(x - STROKE/2, y - STROKE/2, STROKE, STROKE, finger_color[0]);
 		}
 		break;
 	case TOUCH_RELEASE:
