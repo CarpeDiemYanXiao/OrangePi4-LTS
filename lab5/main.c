@@ -25,11 +25,23 @@ static void touch_event_cb(int fd)
 	case TOUCH_PRESS:
 		//printf("type=%d,x=%d,y=%d,finger=%d\n",type,x,y,finger);
 		if((x>=SEND_X)&&(x<SEND_X+SEND_W)&&(y>=SEND_Y)&&(y<SEND_Y+SEND_H)) {
-			/* 发送指定消息（包含多行中文）到 RFCOMM - 使用 CRLF 换行以兼容终端 */
-			char msg[] = "you are a good man\r\nI am a Huster\r\n70\r\n生日快乐\r\n华中科技大学\r\n华中科技大学七十周岁生日快乐\r\n";
-			int len = (int)(sizeof(msg) - 1);
-			printf("bluetooth tty send message (%d bytes)\n", len);
-			myWrite_nonblock(bluetooth_fd, msg, len);
+			/* 逐行发送：每次发送一行并以 CRLF 结尾，接收端容易区分为单独一行 */
+			const char *lines[] = {
+				"you are a good man",
+				"I am a Huster",
+				"70",
+				"生日快乐",
+				"华中科技大学",
+				"华中科技大学七十周岁生日快乐",
+			};
+			for (int i = 0; i < (int)(sizeof(lines)/sizeof(lines[0])); ++i) {
+				char out[256];
+				int n = snprintf(out, sizeof(out), "%s\r\n", lines[i]);
+				if (n > 0) {
+					printf("bluetooth tty send line %d (%d bytes): %s\n", i+1, n, lines[i]);
+					myWrite_nonblock(bluetooth_fd, out, n);
+				}
+			}
 		}
 		break;
 	case TOUCH_ERROR:
@@ -61,36 +73,8 @@ static void bluetooth_tty_event_cb(int fd)
 
 	buf[n] = '\0';
 	printf("bluetooth tty receive \"%s\"\n", buf);
-	/* 将收到的数据按 '\r' 或 '\n' 分行显示到屏幕上 */
-	int start = 0;
-	for (int i = 0; i < n; ++i) {
-		if (buf[i] == '\r' || buf[i] == '\n') {
-			int len_line = i - start;
-			if (len_line > 0) {
-				char line[128];
-				if (len_line >= (int)sizeof(line)) len_line = (int)sizeof(line) - 1;
-				memcpy(line, buf + start, len_line);
-				line[len_line] = '\0';
-				fb_draw_text(2, pen_y, line, 24, COLOR_TEXT);
-				pen_y += 30;
-			}
-			/* 跳过连续的 CR/LF */
-			start = i + 1;
-			while (start < n && (buf[start] == '\r' || buf[start] == '\n')) start++;
-			i = start - 1;
-		}
-	}
-	/* 处理尾部没有换行的最后一行 */
-	if (start < n) {
-		int len_line = n - start;
-		char line[128];
-		if (len_line >= (int)sizeof(line)) len_line = (int)sizeof(line) - 1;
-		memcpy(line, buf + start, len_line);
-		line[len_line] = '\0';
-		fb_draw_text(2, pen_y, line, 24, COLOR_TEXT);
-		pen_y += 30;
-	}
-	fb_update();
+	fb_draw_text(2, pen_y, buf, 24, COLOR_TEXT); fb_update();
+	pen_y += 30;
 	return;
 }
 
