@@ -25,8 +25,11 @@ static void touch_event_cb(int fd)
 	case TOUCH_PRESS:
 		//printf("type=%d,x=%d,y=%d,finger=%d\n",type,x,y,finger);
 		if((x>=SEND_X)&&(x<SEND_X+SEND_W)&&(y>=SEND_Y)&&(y<SEND_Y+SEND_H)) {
-			printf("bluetooth tty send hello\n");
-			myWrite_nonblock(bluetooth_fd, "hello\n", 6);
+			/* 发送指定消息（包含多行中文）到 RFCOMM */
+			char msg[] = "you are a good man\nI am a Huster\n70\n生日快乐\n华中科技大学\n华中科技大学七十周岁生日快乐\n";
+			int len = (int)(sizeof(msg) - 1);
+			printf("bluetooth tty send message (%d bytes)\n", len);
+			myWrite_nonblock(bluetooth_fd, msg, len);
 		}
 		break;
 	case TOUCH_ERROR:
